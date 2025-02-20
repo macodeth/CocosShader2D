@@ -1,0 +1,125 @@
+// Copyright (c) 2017-2020 Xiamen Yaji Software Co., Ltd.
+CCEffect %{
+  techniques:
+  - passes:
+    - vert: sprite-vs:vert
+      frag: sprite-fs:frag
+      depthStencilState:
+        depthTest: false
+        depthWrite: false
+      blendState:
+        targets:
+        - blend: true
+          blendSrc: src_alpha
+          blendDst: one_minus_src_alpha
+          blendDstAlpha: one_minus_src_alpha
+      rasterizerState:
+        cullMode: none
+      properties:
+        alphaThreshold: { value: 0.5 }
+        amount1: { value: 1.0, editor: {range: [0.1, 2.0, 0.01], slide: true}}
+        amount2: { value: 1.4, editor: {range: [0.1, 2.0, 0.01], slide: true}}
+        speed: { value: 2.0, editor: {range: [1.0, 10.0, 0.1], slide: true}}
+        scale: { value: 0.5, editor: {range: [0.1, 1.0, 0.01], slide: true}}
+}%
+
+CCProgram sprite-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #if USE_LOCAL
+    #include <builtin/uniforms/cc-local>
+  #endif
+  #if SAMPLE_FROM_RT
+    #include <common/common-define>
+  #endif
+  in vec3 a_position;
+  in vec2 a_texCoord;
+  in vec4 a_color;
+
+  out vec4 color;
+  out vec2 uv0;
+
+  vec4 vert () {
+    vec4 pos = vec4(a_position, 1);
+
+    #if USE_LOCAL
+      pos = cc_matWorld * pos;
+    #endif
+
+    #if USE_PIXEL_ALIGNMENT
+      pos = cc_matView * pos;
+      pos.xyz = floor(pos.xyz);
+      pos = cc_matProj * pos;
+    #else
+      pos = cc_matViewProj * pos;
+    #endif
+
+    uv0 = a_texCoord;
+    #if SAMPLE_FROM_RT
+      CC_HANDLE_RT_SAMPLE_FLIP(uv0);
+    #endif
+    color = a_color;
+
+
+    return pos;
+  }
+}%
+
+CCProgram sprite-fs %{
+  precision highp float;
+  #include <builtin/internal/embedded-alpha>
+  #include <builtin/internal/alpha-test>
+  #include <cc-global>
+
+  in vec4 color;
+
+  #if USE_TEXTURE
+    in vec2 uv0;
+    #pragma builtin(local)
+    layout(set = 2, binding = 12) uniform sampler2D cc_spriteTexture;
+  #endif
+
+  uniform DATA{
+    float amount1;
+    float amount2;
+    float speed;
+    float scale;
+  };
+
+  vec2 distort(vec2 p) {
+    float theta  = atan(p.y, p.x);
+    float radius = length(p);
+    float t = (sin(cc_time.x * speed) + 1.0) / 2.0;
+    float amount = mix(amount1, amount2, t);
+    radius = pow(radius, amount);
+    p.x = radius * cos(theta);
+    p.y = radius * sin(theta);
+    return 0.5 * (p + 1.0);
+  }
+
+  vec4 frag () {
+    vec4 o = vec4(1, 1, 1, 1);
+
+    #if USE_TEXTURE
+      vec2 uv = uv0 * 2.0 - 1.0;
+      float r = uv.x * uv.x + uv.y * uv.y;
+      if (r < 1.0) {
+        uv = (distort(uv) - 0.5) / scale + 0.5;
+        if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0)
+          o *= CCSampleWithAlphaSeparated(cc_spriteTexture, uv);
+        else
+          o.a = 0.0;
+      } else
+        o.a = 0.0;
+
+      #if IS_GRAY
+        float gray  = 0.2126 * o.r + 0.7152 * o.g + 0.0722 * o.b;
+        o.r = o.g = o.b = gray;
+      #endif
+    #endif
+
+    o *= color;
+    ALPHA_TEST(o);
+    return o;
+  }
+}%

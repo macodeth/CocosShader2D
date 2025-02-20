@@ -1,0 +1,132 @@
+// Copyright (c) 2017-2020 Xiamen Yaji Software Co., Ltd.
+CCEffect %{
+  techniques:
+  - passes:
+    - vert: sprite-vs:vert
+      frag: sprite-fs:frag
+      depthStencilState:
+        depthTest: false
+        depthWrite: false
+      blendState:
+        targets:
+        - blend: true
+          blendSrc: src_alpha
+          blendDst: one_minus_src_alpha
+          blendDstAlpha: one_minus_src_alpha
+      rasterizerState:
+        cullMode: none
+      properties:
+        fov: {value: 90.0}
+        y_rot: {value: 0.0}
+        x_rot: {value: 0.0}
+}%
+
+CCProgram sprite-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #if USE_LOCAL
+    #include <builtin/uniforms/cc-local>
+  #endif
+  #include <common/common-define>
+
+  in vec3 a_position;
+  in vec2 a_texCoord;
+  in vec4 a_color;
+
+  out vec4 color;
+  out vec2 uv0;
+
+  out vec2 center;
+  out vec3 p;
+
+  uniform DATA {
+    float fov;
+    float y_rot;
+    float x_rot;
+  };
+
+  vec4 vert () {
+    vec4 pos = vec4(a_position, 1);
+
+    #if USE_LOCAL
+      pos = cc_matWorld * pos;
+    #endif
+
+    #if USE_PIXEL_ALIGNMENT
+      pos = cc_matView * pos;
+      pos.xyz = floor(pos.xyz);
+      pos = cc_matProj * pos;
+    #else
+      pos = cc_matViewProj * pos;
+    #endif
+
+    uv0 = a_texCoord;
+
+    float sin_b = sin(y_rot / 180.0 * PI);
+    float cos_b = cos(y_rot / 180.0 * PI);
+    float sin_c = sin(x_rot / 180.0 * PI);
+    float cos_c = cos(x_rot / 180.0 * PI);
+    
+    mat3 inv_rot_mat;
+    inv_rot_mat[0][0] = cos_b;
+    inv_rot_mat[0][1] = 0.0;
+    inv_rot_mat[0][2] = -sin_b;
+    
+    inv_rot_mat[1][0] = sin_b * sin_c;
+    inv_rot_mat[1][1] = cos_c;
+    inv_rot_mat[1][2] = cos_b * sin_c;
+    
+    inv_rot_mat[2][0] = sin_b * cos_c;
+    inv_rot_mat[2][1] = -sin_c;
+    inv_rot_mat[2][2] = cos_b * cos_c;
+    
+    
+    float t = tan(fov / 360.0 * PI);
+    p = inv_rot_mat * vec3(uv0 - 0.5, 0.5 / t);
+    float v = (0.5 / t) + 0.5;
+    p.xy *= v * inv_rot_mat[2].z;
+    center = v * inv_rot_mat[2].xy;
+
+    #if SAMPLE_FROM_RT
+      CC_HANDLE_RT_SAMPLE_FLIP(uv0);
+    #endif
+    color = a_color;
+
+    return pos;
+  }
+}%
+
+CCProgram sprite-fs %{
+  precision highp float;
+  #include <builtin/internal/embedded-alpha>
+  #include <builtin/internal/alpha-test>
+  #include <common-define>
+
+  in vec4 color;
+  in vec2 center;
+  in vec3 p;
+
+  #if USE_TEXTURE
+    in vec2 uv0;
+    #pragma builtin(local)
+    layout(set = 2, binding = 12) uniform sampler2D cc_spriteTexture;
+  #endif
+
+  vec4 frag () {
+    vec4 o = vec4(1, 1, 1, 1);
+
+    #if USE_TEXTURE
+      vec2 uv = (p.xy / p.z).xy - center;
+      o *= CCSampleWithAlphaSeparated(cc_spriteTexture, uv + 0.5);
+      o.a *= step(max(abs(uv.x), abs(uv.y)), 0.5);
+      #if IS_GRAY
+        float gray  = 0.2126 * o.r + 0.7152 * o.g + 0.0722 * o.b;
+        o.r = o.g = o.b = gray;
+      #endif
+    #endif
+
+    o *= color;
+    ALPHA_TEST(o);
+    return o;
+  }
+}%
