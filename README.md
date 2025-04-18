@@ -9,7 +9,7 @@ https://github.com/user-attachments/assets/01b5c4f9-dc6a-4ee5-96a3-8ac74dba835e
 
 
 ## Shaders
-- Parallax: infinite scrolling sprite, works even if texture doesn't have CLAMP wrapping mode
+- Parallax: infinite scrolling sprite, works even if texture doesn't have REPEAT wrapping mode
 - Outline: add a simple outline to sprite
 - Barrel Distortion (borrowed from Phaser)
 - Pixelate (borrowed from Phaser)
